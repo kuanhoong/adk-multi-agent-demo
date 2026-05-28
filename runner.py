@@ -5,7 +5,10 @@ Handles session creation, pipeline execution, event streaming,
 and progress tracking for the Streamlit UI.
 """
 import asyncio
+import io
 import json
+import sys
+from contextlib import contextmanager
 from typing import Callable, Optional
 
 from dotenv import load_dotenv
@@ -18,6 +21,43 @@ from agent import root_agent
 load_dotenv()
 
 APP_NAME = "qc_inspector"
+
+# Noise patterns printed directly to stdout by google-genai when the model
+# returns thinking tokens (thought_signature).  These are informational only
+# and safe to suppress in a Streamlit context.
+_SUPPRESS_SUBSTRINGS = (
+    "non-text parts in the response",
+    "thought_signature",
+    "returning concatenated text result",
+    "Check the full candidates",
+)
+
+
+@contextmanager
+def _suppress_genai_noise():
+    """Redirect stdout/stderr lines matching known google-genai noise patterns."""
+    class _Filter(io.TextIOWrapper):
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def write(self, s):
+            if not any(sub in s for sub in _SUPPRESS_SUBSTRINGS):
+                self._wrapped.write(s)
+            return len(s)
+
+        def flush(self):
+            self._wrapped.flush()
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+    old_out, old_err = sys.stdout, sys.stderr
+    sys.stdout = _Filter(old_out)
+    sys.stderr = _Filter(old_err)
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
 USER_ID  = "demo_user"
 
 AGENT_PIPELINE_ORDER = [
@@ -141,17 +181,18 @@ async def run_inspection_async(
         progress_callback(AGENT_PIPELINE_ORDER[0], "running")
 
     try:
-        async for event in runner.run_async(
-            user_id=USER_ID,
-            session_id=session_id,
-            new_message=content,
-        ):
-            completed = detect_agent_from_event(event)
-            if completed and progress_callback:
-                progress_callback(completed, "done")
-                idx = AGENT_PIPELINE_ORDER.index(completed)
-                if idx + 1 < len(AGENT_PIPELINE_ORDER):
-                    progress_callback(AGENT_PIPELINE_ORDER[idx + 1], "running")
+        with _suppress_genai_noise():
+            async for event in runner.run_async(
+                user_id=USER_ID,
+                session_id=session_id,
+                new_message=content,
+            ):
+                completed = detect_agent_from_event(event)
+                if completed and progress_callback:
+                    progress_callback(completed, "done")
+                    idx = AGENT_PIPELINE_ORDER.index(completed)
+                    if idx + 1 < len(AGENT_PIPELINE_ORDER):
+                        progress_callback(AGENT_PIPELINE_ORDER[idx + 1], "running")
     except Exception as exc:
         if progress_callback:
             for agent_id in AGENT_PIPELINE_ORDER:

@@ -346,13 +346,13 @@ def main():
                 st.error(f"Unsupported file type. Accepted: {', '.join(ACCEPTED_EXTENSIONS)}")
             else:
                 image_bytes = uploaded.read()
-                st.image(image_bytes, caption=uploaded.name, use_container_width=True)
+                st.image(image_bytes, caption=uploaded.name, width="stretch")
                 st.session_state["image_bytes"] = image_bytes
                 st.session_state["image_name"] = uploaded.name
                 st.session_state.pop("session_state_result", None)  # clear stale results
 
         run_disabled = "image_bytes" not in st.session_state
-        if st.button("▶  Run Analysis", disabled=run_disabled, use_container_width=True, type="primary"):
+        if st.button("▶  Run Analysis", disabled=run_disabled, width="stretch", type="primary"):
             st.session_state["run_requested"] = True
             st.session_state["agent_statuses"] = build_initial_statuses()
 
@@ -409,7 +409,7 @@ def main():
                 data=report_json,
                 file_name=f"qc_report_{st.session_state.get('image_name', 'report')}.json",
                 mime="application/json",
-                use_container_width=True,
+                width="stretch",
             )
         else:
             render_placeholder_results()
